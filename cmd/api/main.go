@@ -13,6 +13,28 @@ import (
 	"homework/internal/app"
 )
 
+type serverConfig struct {
+	scheme   string
+	tls      bool
+	certFile string
+	keyFile  string
+}
+
+func loadServerConfig(certFile, keyFile string) (serverConfig, error) {
+	if certFile == "" && keyFile == "" {
+		return serverConfig{scheme: "http"}, nil
+	}
+	if certFile == "" || keyFile == "" {
+		return serverConfig{}, errors.New("TLS_CERT_FILE and TLS_KEY_FILE must be configured together")
+	}
+	return serverConfig{
+		scheme:   "https",
+		tls:      true,
+		certFile: certFile,
+		keyFile:  keyFile,
+	}, nil
+}
+
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -22,10 +44,9 @@ func main() {
 		addr = ":" + p
 	}
 
-	certFile := os.Getenv("TLS_CERT_FILE")
-	keyFile := os.Getenv("TLS_KEY_FILE")
-	if certFile == "" || keyFile == "" {
-		log.Fatal("TLS_CERT_FILE and TLS_KEY_FILE must be configured for HTTPS")
+	config, err := loadServerConfig(os.Getenv("TLS_CERT_FILE"), os.Getenv("TLS_KEY_FILE"))
+	if err != nil {
+		log.Fatal(err)
 	}
 
 	server := &http.Server{
@@ -37,11 +58,16 @@ func main() {
 		IdleTimeout:       60 * time.Second,
 	}
 
-	log.Printf("listening over HTTPS on %s", addr)
 	serverErrors := make(chan error, 1)
 	go func() {
-		serverErrors <- server.ListenAndServeTLS(certFile, keyFile)
+		if config.tls {
+			serverErrors <- server.ListenAndServeTLS(config.certFile, config.keyFile)
+			return
+		}
+		serverErrors <- server.ListenAndServe()
 	}()
+
+	log.Printf("listening over %s on %s", config.scheme, addr)
 
 	select {
 	case <-ctx.Done():
