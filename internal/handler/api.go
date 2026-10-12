@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"homework/internal/model"
+	"libratrack/internal/model"
 )
 
 const maxRequestBodyBytes = 1 << 20

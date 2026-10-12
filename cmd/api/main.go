@@ -10,7 +10,8 @@ import (
 	"syscall"
 	"time"
 
-	"homework/internal/app"
+	"libratrack/internal/app"
+	"libratrack/internal/repository"
 )
 
 type serverConfig struct {
@@ -49,9 +50,30 @@ func main() {
 		log.Fatal(err)
 	}
 
+	databaseURL := os.Getenv("DATABASE_URL")
+	if databaseURL == "" {
+		log.Fatal("DATABASE_URL must be configured")
+	}
+	migrationsPath := os.Getenv("MIGRATIONS_PATH")
+	if migrationsPath == "" {
+		migrationsPath = "migrations"
+	}
+	if err := repository.ApplyMigrations(migrationsPath, databaseURL); err != nil {
+		log.Fatal(err)
+	}
+	db, err := repository.OpenPostgres(databaseURL)
+	if err != nil {
+		log.Fatal(err)
+	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer sqlDB.Close()
+
 	server := &http.Server{
 		Addr:              addr,
-		Handler:           app.NewRouter(),
+		Handler:           app.NewRouterWithDB(db),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      30 * time.Second,

@@ -10,10 +10,13 @@ import (
 	"runtime"
 	"strings"
 
-	"homework/internal/handler"
-	"homework/internal/middleware"
-	"homework/internal/model"
-	"homework/internal/repository"
+	"gorm.io/gorm"
+
+	"libratrack/internal/handler"
+	"libratrack/internal/middleware"
+	"libratrack/internal/model"
+	"libratrack/internal/repository"
+	"libratrack/internal/service"
 )
 
 // NewRouter creates a fresh, isolated API handler for the selected variant.
@@ -42,6 +45,16 @@ func NewRouter() http.Handler {
 	return middleware.RequestLogger(slog.Default())(
 		middleware.CORS(middleware.Recoverer(mux)),
 	)
+}
+
+func NewRouterWithDB(db *gorm.DB) http.Handler {
+	library := service.NewLibrary(
+		repository.NewGormBookRepository(db),
+		repository.NewGormAuthorRepository(db),
+		repository.NewGormCategoryRepository(db),
+		repository.NewGormCopyRepository(db),
+	)
+	return handler.NewLibraryAPI(library)
 }
 
 func loadVariant() model.Variant {
