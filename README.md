@@ -9,6 +9,7 @@
 1. Створіть свій репозиторій із цього шаблону (кнопка **Use this template** або посилання від викладача).
 2. Відкрийте файл `VARIANT` і запишіть назву **вашого варіанта** (див. таблицю нижче), наприклад `movies`.
 3. Запустіть `go test ./...`. Усі тести спочатку **червоні**, це нормально: ви рухаєтеся до зеленого.
+  На macOS з Go 1.22 використовуйте `sh scripts/test.sh ./...`: скрипт вмикає зовнішній linker, щоб обійти відсутній `LC_UUID` у тестових бінарниках.
 4. Реалізуйте `NewRouter()` у `internal/app/app.go` й усе, що потрібно для нього.
 5. Після кожного `git push` GitHub Actions запускає перевірку й показує бали на сторінці запуску (розділ *Summary*).
 
@@ -206,3 +207,65 @@ go test -race ./...
 go vet ./...
 gofmt -l .
 ```
+
+## Lesson 8 Report
+
+### Run locally
+
+```sh
+cp .env.example .env
+docker compose up -d postgres
+set -a
+. ./.env
+set +a
+go run ./cmd/api
+```
+
+`.env.example` is the committed template; `.env` is the local configuration read automatically by Docker Compose and ignored by Git. The shell export makes the same variables available to `go run`. The application runs migrations before accepting requests. Migration `000001_init_schema` represents the previous text-field schema. Migration `000002_normalize_books` moves categories and authors into separate tables, creates the many-to-many join table and foreign keys, and adds foreign-key indexes. Migration `000003_seed_demo_data` adds 10 books, 5 authors, 3 categories, copies, and two users. Each migration has a matching down file.
+
+The production request path is `cmd/api -> app.NewRouterWithDB -> handler.LibraryAPI -> service.Library -> repository interfaces -> GORM`. HTTP handlers contain request parsing and response mapping; reference validation and book/copy use cases live in the service; each GORM query is encapsulated by a repository. The original in-memory `app.NewRouter()` remains for the Lesson 7 stage tests, while the running server uses `NewRouterWithDB`.
+
+### Migration prompt
+
+> Generate `000002_normalize_books.up.sql` and `000002_normalize_books.down.sql` for golang-migrate PostgreSQL migrations. The starting schema has a `books` table with `id`, `title`, `isbn`, `author` (text, possibly a comma-separated list), and `category` (text). Normalize it to `authors(id, full_name, bio)`, `categories(id, name)`, `books` with `category_id`, and the many-to-many join table `book_authors(book_id, author_id)`. Preserve existing book data: create distinct author/category rows, split comma-separated author names, and populate both relationships before dropping the old text columns. Add explicit named foreign-key constraints and indexes on foreign-key columns. Use `ON DELETE RESTRICT` for a book's category and `ON DELETE CASCADE` for rows in `book_authors` when a book is deleted. Make the down migration reverse the transformation: restore the text columns and values first, then drop dependent tables, constraints, and indexes in reverse dependency order. Also create `copies` and `users` tables with their foreign keys/check constraints for this application. Do not use ORM auto-migration.
+
+The down migration was exercised against a legacy book containing two comma-separated authors; rolling back restored its original `author` and `category` text values.
+
+### N+1 evidence: BEFORE FIX
+
+The baseline was reproduced locally by loading each book's authors and category inside a loop. The sample database contained 10 books. One list request executed 21 SELECT statements: one books query, then one author query and one category query per book. Representative log lines:
+
+```text
+[8.772ms] [rows:10] SELECT * FROM "books" ORDER BY id ASC LIMIT 100
+[2.346ms] [rows:2] SELECT "authors"."id","authors"."full_name","authors"."bio","authors"."created_at","authors"."updated_at" FROM "authors" JOIN "book_authors" ON "book_authors"."author_id" = "authors"."id" AND "book_authors"."book_id" = 1
+[0.922ms] [rows:1] SELECT * FROM "categories" WHERE "categories"."id" = 1 ORDER BY "categories"."id" LIMIT 1
+[0.357ms] [rows:2] SELECT "authors"."id","authors"."full_name","authors"."bio","authors"."created_at","authors"."updated_at" FROM "authors" JOIN "book_authors" ON "book_authors"."author_id" = "authors"."id" AND "book_authors"."book_id" = 2
+[0.339ms] [rows:1] SELECT * FROM "categories" WHERE "categories"."id" = 1 ORDER BY "categories"."id" LIMIT 1
+...
+[0.289ms] [rows:2] SELECT "authors"."id","authors"."full_name","authors"."bio","authors"."created_at","authors"."updated_at" FROM "authors" JOIN "book_authors" ON "book_authors"."author_id" = "authors"."id" AND "book_authors"."book_id" = 10
+[0.283ms] [rows:1] SELECT * FROM "categories" WHERE "categories"."id" = 3 ORDER BY "categories"."id" LIMIT 1
+```
+
+### N+1 evidence: AFTER FIX
+
+The final `List` uses `.Preload("Authors").Preload("Category")` and joins `Category` into the books query. GORM recognizes the already joined category and does not issue a redundant preload query. It consistently uses three SELECT statements, independent of the number of books. Captured GORM log excerpt:
+
+```text
+[3.283ms] [rows:18] SELECT * FROM "book_authors" WHERE "book_authors"."book_id" IN (1,2,3,4,5,6,7,8,9,10)
+[1.528ms] [rows:5] SELECT * FROM "authors" WHERE "authors"."id" IN (1,2,3,4,5)
+[23.193ms] [rows:10] SELECT "books"."id","books"."title","books"."isbn","books"."category_id","books"."created_at","books"."updated_at","Category"."id" AS "Category__id","Category"."name" AS "Category__name","Category"."created_at" AS "Category__created_at","Category"."updated_at" AS "Category__updated_at" FROM "books" LEFT JOIN "categories" "Category" ON "books"."category_id" = "Category"."id" ORDER BY id ASC LIMIT 100
+2026/10/12 13:41:57 INFO HTTP request method=GET path=/api/v1/books status=200 duration=15ms
+```
+
+GORM's many-to-many association needs one batch query for the join table and one for authors; joining the single-valued category into the main query keeps the total at three. The response was checked to include each book's category and authors.
+
+### Latency
+
+Measured locally with five sequential `curl` requests to `GET /api/v1/books?limit=100`, against the same isolated PostgreSQL database containing the same 10 seeded books. One unmeasured warm-up request was run before each five-request sample.
+
+| Implementation | Samples (ms) | Mean (ms) | Median (ms) | SELECTs/request |
+|---|---|---:|---:|---:|
+| Per-book association queries (before) | 6.501, 7.218, 8.459, 7.167, 8.120 | 7.493 | 7.218 | 21 |
+| Batched association preloads + joined category (after) | 2.843, 3.534, 4.154, 2.945, 2.845 | 3.264 | 2.945 | 3 |
+
+These are local development measurements, not a production benchmark. With the warm-up request excluded consistently, the mean fell by about 56% and the median by about 59%.

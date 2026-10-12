@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"homework/internal/model"
+	"libratrack/internal/model"
 )
 
 // ErrIDExhausted means the uint32 identifier space is exhausted.
