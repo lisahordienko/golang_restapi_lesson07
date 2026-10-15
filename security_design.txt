@@ -1,0 +1,63 @@
+LibraTrack Security Design
+==========================
+
+1. Roles
+--------
+- reader: default role assigned at registration; may browse books and manage own profile/loans view
+- librarian: staff role for catalog and loan lifecycle operations
+- admin: full staff privileges plus user administration
+
+2. Access control matrix
+------------------------
+Public (unauthenticated)
+  POST /api/v1/auth/register
+  POST /api/v1/auth/login
+  GET  /api/v1/books
+  GET  /api/v1/books/:id
+  GET  /api/v1/books/:id/copies
+  GET  /api/v1/books/:id/availability
+  GET  /api/v1/categories[/:id]
+  GET  /api/v1/authors[/:id]
+
+Protected (any authenticated user; AuthMiddleware)
+  GET  /api/v1/me
+  PUT  /api/v1/me
+  GET  /api/v1/me/loans
+
+Staff (librarian or admin; AuthMiddleware then RequireRole)
+  POST   /api/v1/books
+  PUT    /api/v1/books/:id
+  DELETE /api/v1/books/:id
+  POST   /api/v1/books/:id/copies
+  POST   /api/v1/categories
+  POST   /api/v1/authors
+  POST   /api/v1/loans
+  POST   /api/v1/loans/:id/return
+
+Admin (admin only; AuthMiddleware then RequireRole("admin"))
+  GET /api/v1/users
+  PUT /api/v1/users/:id/role
+
+Middleware order: AuthMiddleware validates Bearer JWT and sets user_id/role,
+then RequireRole enforces the allowed roles. Failures use AbortWithStatusJSON
+(401 unauthenticated, 403 forbidden).
+
+3. DTO design (mass-assignment prevention)
+-----------------------------------------
+RegisterRequest: email, password only. Role is forced to "reader" server-side.
+LoginRequest: email, password only.
+UpdateProfileRequest: email only (role and password_hash are ignored if sent).
+UpdateUserRoleRequest: role only; reachable solely via admin routes.
+CreateLoanRequest: copy_id only; user_id comes from JWT claims.
+BookRequest / CategoryRequest / AuthorRequest / CopyRequest: explicit writable fields only.
+
+model.User.PasswordHash uses `json:"-"` so hashes never appear in JSON responses.
+User list queries select public columns only (id, email, role, timestamps).
+
+4. Password and token rules
+---------------------------
+- Passwords hashed with bcrypt.GenerateFromPassword(..., bcrypt.DefaultCost)
+- Login failures (unknown email or wrong password) return identical HTTP 401
+  message: "invalid credentials"
+- JWT signed with HS256 using os.Getenv("JWT_SECRET"); claims: user_id, role, exp (24h)
+- Request logging records method/path/status/metadata only; never request bodies
