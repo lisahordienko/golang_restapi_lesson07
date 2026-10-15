@@ -10,8 +10,10 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
+	"libratrack/internal/auth"
 	"libratrack/internal/handler"
 	"libratrack/internal/middleware"
 	"libratrack/internal/model"
@@ -47,14 +49,80 @@ func NewRouter() http.Handler {
 	)
 }
 
+// NewRouterWithDB builds the production Gin API with auth and RBAC route groups.
 func NewRouterWithDB(db *gorm.DB) http.Handler {
+	gin.SetMode(gin.ReleaseMode)
+
 	library := service.NewLibrary(
 		repository.NewGormBookRepository(db),
 		repository.NewGormAuthorRepository(db),
 		repository.NewGormCategoryRepository(db),
 		repository.NewGormCopyRepository(db),
 	)
-	return handler.NewLibraryAPI(library)
+	authService := auth.NewService(repository.NewGormUserRepository(db))
+	loanService := service.NewLoanService(repository.NewGormLoanRepository(db))
+
+	libraryHandler := handler.NewLibraryHandler(library)
+	authHandler := handler.NewAuthHandler(authService)
+	loanHandler := handler.NewLoanHandler(loanService)
+
+	router := gin.New()
+	router.Use(middleware.BodyLimit(1 << 20))
+
+	router.GET("/health", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	})
+	router.GET("/swagger/index.html", func(c *gin.Context) {
+		c.Data(http.StatusOK, "text/html; charset=utf-8", []byte("<!doctype html><title>LibraTrack API</title><h1>LibraTrack API</h1>"))
+	})
+
+	api := router.Group("/api/v1")
+
+	public := api.Group("")
+	{
+		public.POST("/auth/register", authHandler.Register)
+		public.POST("/auth/login", authHandler.Login)
+		public.GET("/books", libraryHandler.ListBooks)
+		public.GET("/books/:id", libraryHandler.GetBook)
+		public.GET("/books/:id/copies", libraryHandler.ListCopies)
+		public.GET("/books/:id/availability", libraryHandler.Availability)
+		public.GET("/categories", libraryHandler.ListCategories)
+		public.GET("/categories/:id", libraryHandler.GetCategory)
+		public.GET("/authors", libraryHandler.ListAuthors)
+		public.GET("/authors/:id", libraryHandler.GetAuthor)
+	}
+
+	protected := api.Group("")
+	protected.Use(middleware.AuthMiddleware())
+	{
+		protected.GET("/me", authHandler.Me)
+		protected.PUT("/me", authHandler.UpdateMe)
+		protected.GET("/me/loans", loanHandler.Mine)
+	}
+
+	staff := api.Group("")
+	staff.Use(middleware.AuthMiddleware(), middleware.RequireRole("librarian", "admin"))
+	{
+		staff.POST("/books", libraryHandler.CreateBook)
+		staff.PUT("/books/:id", libraryHandler.UpdateBook)
+		staff.DELETE("/books/:id", libraryHandler.DeleteBook)
+		staff.POST("/books/:id/copies", libraryHandler.CreateCopy)
+		staff.POST("/categories", libraryHandler.CreateCategory)
+		staff.POST("/authors", libraryHandler.CreateAuthor)
+		staff.POST("/loans", loanHandler.Create)
+		staff.POST("/loans/:id/return", loanHandler.Return)
+	}
+
+	admin := api.Group("")
+	admin.Use(middleware.AuthMiddleware(), middleware.RequireRole("admin"))
+	{
+		admin.GET("/users", authHandler.ListUsers)
+		admin.PUT("/users/:id/role", authHandler.UpdateUserRole)
+	}
+
+	return middleware.RequestLogger(slog.Default())(
+		middleware.CORS(middleware.Recoverer(router)),
+	)
 }
 
 func loadVariant() model.Variant {

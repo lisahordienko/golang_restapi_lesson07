@@ -61,14 +61,23 @@ jobs:
             docker-compose.yml .env.example .gitignore
             migrations/000001_init_schema.up.sql migrations/000001_init_schema.down.sql
             migrations/000002_normalize_books.up.sql migrations/000002_normalize_books.down.sql
-            migrations/000003_seed_demo_data.up.sql migrations/000003_seed_demo_data.down.sql
+            migrations/000003_add_auth_fields.up.sql migrations/000003_add_auth_fields.down.sql
+            migrations/000004_seed_demo_data.up.sql migrations/000004_seed_demo_data.down.sql
+            migrations/000005_auth_compat.up.sql migrations/000005_auth_compat.down.sql
+            migrations/000006_create_loans.up.sql migrations/000006_create_loans.down.sql
             internal/model/author.go internal/model/book.go internal/model/category.go
-            internal/model/copy.go internal/model/user.go
+            internal/model/copy.go internal/model/user.go internal/model/loan.go
             internal/repository/errors.go internal/repository/db.go internal/repository/migrate.go
             internal/repository/book_repository.go internal/repository/author_repository.go
             internal/repository/category_repository.go internal/repository/copy_repository.go
+            internal/repository/user_repository.go internal/repository/loan_repository.go
             internal/handler/errors.go internal/handler/book_handler.go internal/handler/author_handler.go
             internal/handler/category_handler.go internal/handler/copy_handler.go
+            internal/handler/auth_handler.go internal/handler/loan_handler.go
+            internal/auth/auth.go internal/middleware/auth.go internal/middleware/rbac.go
+            internal/middleware/body_limit.go
+            internal/app/auth_test.go internal/app/rbac_test.go prompts.txt security_audit.md
+            security_design.txt
             cmd/api/main.go
           )
           missing=""
@@ -82,6 +91,8 @@ jobs:
           check "go.mod has gorm" grep -q 'gorm.io/gorm' go.mod
           check "go.mod has the gorm postgres driver" grep -q 'gorm.io/driver/postgres' go.mod
           check "go.mod has golang-migrate" grep -q 'golang-migrate/migrate' go.mod
+          check "go.mod has gin" grep -q 'gin-gonic/gin' go.mod
+          check "go.mod has jwt" grep -q 'golang-jwt/jwt/v5' go.mod
 
           book_no_text_fields() { ! grep -nE '^\s*(Author|Category)\s+string' internal/model/book.go; }
           check "Book model has no plain-text Author/Category fields" book_no_text_fields
@@ -266,7 +277,7 @@ jobs:
           build_app() { go build -o bin/api ./cmd/api; }
           check "go build ./cmd/api" build_app
 
-          DATABASE_URL="$APP_URL" MIGRATIONS_PATH=migrations PORT=8080 ./bin/api > app.log 2>&1 &
+          JWT_SECRET='theme8-ci-jwt-secret-with-enough-entropy' DATABASE_URL="$APP_URL" MIGRATIONS_PATH=migrations PORT=8080 ./bin/api > app.log 2>&1 &
           echo $! > app.pid
           trap 'kill $(cat app.pid) 2>/dev/null || true' EXIT
 
@@ -283,13 +294,14 @@ jobs:
           pass "Server starts and /health answers 200"
 
           BASE=http://localhost:8080/api/v1
+          AUTH_HEADER=()
 
           api() {
             local m="$1" p="$2" b="${3:-}"
             if [ -n "$b" ]; then
-              curl -s -o resp.json -w '%{http_code}' -X "$m" "$BASE$p" -H 'Content-Type: application/json' -d "$b"
+              curl -s -o resp.json -w '%{http_code}' -X "$m" "$BASE$p" -H 'Content-Type: application/json' "${AUTH_HEADER[@]}" -d "$b"
             else
-              curl -s -o resp.json -w '%{http_code}' -X "$m" "$BASE$p"
+              curl -s -o resp.json -w '%{http_code}' -X "$m" "$BASE$p" "${AUTH_HEADER[@]}"
             fi
           }
           http() { # name expected-status method path [body]
@@ -298,6 +310,18 @@ jobs:
             got=$(api "$@")
             if [ "$got" = "$want" ]; then pass "$name"; else fail "$name" "expected HTTP $want, got $got: $(head -c 300 resp.json)"; fi
           }
+
+          # obtain staff JWT for write endpoints protected by RBAC
+          http "POST /auth/register creates a smoke staff user" 201 POST /auth/register '{"email":"smoke-staff@example.test","password":"strong-password"}'
+          psql "$APP_URL" -v ON_ERROR_STOP=1 -c "UPDATE users SET role='admin' WHERE email='smoke-staff@example.test'" >/dev/null
+          http "POST /auth/login returns a JWT" 200 POST /auth/login '{"email":"smoke-staff@example.test","password":"strong-password"}'
+          TOKEN=$(jq -r '.token' resp.json)
+          if [ -z "$TOKEN" ] || [ "$TOKEN" = "null" ]; then
+            fail "Smoke test obtained a JWT" "$(head -c 300 resp.json)"
+            exit 1
+          fi
+          AUTH_HEADER=(-H "Authorization: Bearer $TOKEN")
+          pass "Smoke test obtained a JWT"
           jqis() { # name jq-filter expected-value (reads resp.json)
             local name="$1" filter="$2" want="$3" got
             got=$(jq -r "$filter" resp.json 2> /dev/null || echo "invalid json")

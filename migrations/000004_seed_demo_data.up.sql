@@ -54,6 +54,8 @@ CROSS JOIN generate_series(1, 3) AS copy_no
 WHERE books.isbn LIKE '97800000000%'
 ON CONFLICT (inventory_no) DO NOTHING;
 
-INSERT INTO users (email, role) VALUES
-    ('librarian@example.test', 'admin'), ('reader@example.test', 'member')
+INSERT INTO users (email, password_hash, role) VALUES
+    ('admin@example.test', '$2a$10$Touuttgkd3jbaP8oenep0u/C9Qdeyxka7CKJWUz66M8.fAU6QVdDW', 'admin'),
+    ('librarian@example.test', '$2a$10$Touuttgkd3jbaP8oenep0u/C9Qdeyxka7CKJWUz66M8.fAU6QVdDW', 'librarian'),
+    ('reader@example.test', '$2a$10$Touuttgkd3jbaP8oenep0u/C9Qdeyxka7CKJWUz66M8.fAU6QVdDW', 'reader')
 ON CONFLICT (email) DO NOTHING;
