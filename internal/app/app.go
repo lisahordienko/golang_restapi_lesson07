@@ -10,8 +10,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
-	"libratrack"
-
 	"libratrack/internal/auth"
 	"libratrack/internal/handler"
 	webhandler "libratrack/internal/handler/web"
@@ -19,6 +17,7 @@ import (
 	"libratrack/internal/model"
 	"libratrack/internal/repository"
 	"libratrack/internal/service"
+	webassets "libratrack/web"
 )
 
 // NewRouter creates a fresh, isolated API handler for the selected variant.
@@ -134,7 +133,7 @@ func NewRouterWithDB(db *gorm.DB) http.Handler {
 }
 
 func loadVariant() model.Variant {
-	data, err := libratrack.Files.ReadFile("VARIANT")
+	data, err := webassets.Runtime.ReadFile("VARIANT")
 	if err != nil {
 		panic(err)
 	}

@@ -1,1 +1,1 @@
-DROP TABLE IF EXISTS books;
+../web/migrations/000001_init_schema.down.sql

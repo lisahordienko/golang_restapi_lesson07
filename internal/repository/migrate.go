@@ -11,7 +11,7 @@ import (
 	_ "github.com/golang-migrate/migrate/v4/source/file"
 	"github.com/golang-migrate/migrate/v4/source/iofs"
 
-	"libratrack"
+	webassets "libratrack/web"
 )
 
 func ApplyMigrations(path, databaseURL string) error {
@@ -29,7 +29,7 @@ func ApplyMigrations(path, databaseURL string) error {
 }
 
 func ApplyEmbeddedMigrations(databaseURL string) error {
-	source, err := iofs.New(libratrack.Files, "migrations")
+	source, err := iofs.New(webassets.Runtime, "migrations")
 	if err != nil {
 		return fmt.Errorf("create embedded migration source: %w", err)
 	}
