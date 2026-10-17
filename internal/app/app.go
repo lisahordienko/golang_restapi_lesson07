@@ -5,9 +5,6 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
-	"os"
-	"path/filepath"
-	"runtime"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -15,10 +12,12 @@ import (
 
 	"libratrack/internal/auth"
 	"libratrack/internal/handler"
+	webhandler "libratrack/internal/handler/web"
 	"libratrack/internal/middleware"
 	"libratrack/internal/model"
 	"libratrack/internal/repository"
 	"libratrack/internal/service"
+	webassets "libratrack/web"
 )
 
 // NewRouter creates a fresh, isolated API handler for the selected variant.
@@ -65,9 +64,17 @@ func NewRouterWithDB(db *gorm.DB) http.Handler {
 	libraryHandler := handler.NewLibraryHandler(library)
 	authHandler := handler.NewAuthHandler(authService)
 	loanHandler := handler.NewLoanHandler(loanService)
+	webHandler, err := webhandler.New(library, authService)
+	if err != nil {
+		panic(err)
+	}
 
 	router := gin.New()
 	router.Use(middleware.BodyLimit(1 << 20))
+	router.POST("/web/login", middleware.RequireSameOrigin(), authHandler.BrowserLogin)
+	if err := webHandler.Register(router); err != nil {
+		panic(err)
+	}
 
 	router.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
@@ -126,9 +133,7 @@ func NewRouterWithDB(db *gorm.DB) http.Handler {
 }
 
 func loadVariant() model.Variant {
-	_, file, _, _ := runtime.Caller(0)
-	variantPath := filepath.Join(filepath.Dir(file), "..", "..", "VARIANT")
-	data, err := os.ReadFile(variantPath)
+	data, err := webassets.Runtime.ReadFile("VARIANT")
 	if err != nil {
 		panic(err)
 	}

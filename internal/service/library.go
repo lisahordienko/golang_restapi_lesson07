@@ -66,6 +66,10 @@ func (s *Library) Books(ctx context.Context, categoryID, limit, offset uint) ([]
 	return s.books.List(ctx, categoryID, limit, offset)
 }
 
+func (s *Library) SearchBooks(ctx context.Context, query string, limit uint) ([]model.Book, error) {
+	return s.books.Search(ctx, query, limit)
+}
+
 func (s *Library) Book(ctx context.Context, id uint) (*model.Book, error) {
 	value, err := s.books.FindByID(ctx, id)
 	return value, translateError(err)

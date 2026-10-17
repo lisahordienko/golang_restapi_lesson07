@@ -6,6 +6,40 @@ TASK 2.2 — JWT middleware, RBAC, and route groups
 
 Implement `internal/middleware/auth.go` and `internal/middleware/rbac.go` for the existing Gin application. AuthMiddleware must parse only `Authorization: Bearer <token>`, validate HS256 signature and expiration, and set typed `user_id` and `role` values in Gin context. Every authentication failure must call `c.AbortWithStatusJSON(401, ...)`; missing JWT_SECRET must fail closed with a generic 500. Implement variadic `RequireRole(allowed ...string)`: if no authenticated role is present, abort with 401; if the role is not allowed, abort with 403; never call the next handler after an abort. Register nested Gin groups in this order: public routes for register/login and GET books; protected routes using AuthMiddleware for GET/PUT `/me` and GET `/me/loans`; staff routes using AuthMiddleware first and RequireRole("librarian", "admin") second for book writes and loan checkout/return; admin routes using AuthMiddleware first and RequireRole("admin") second for GET `/users` and PUT `/users/:id/role`. Keep profile, registration, loan, and role update bodies as explicit DTOs. Add httptest integration coverage for missing/expired tokens, reader 403, staff/admin 201, and admin-only endpoints.
 
+
+TASK 2.1 — Server-rendered catalog templates
+
+Generate the Go HTML templates for the LibraTrack book catalog in
+`web/templates/layout.html`, `web/templates/catalog.html`, and
+`web/templates/partials/book_row.html`. Use Go's `html/template` conventions
+and named definitions. The layout must contain `{{block "content" .}}{{end}}`
+inside the catalog table area. The catalog page must render a responsive,
+accessible table with book title, author(s), category, ISBN, and an
+availability indicator showing available copies versus total copies. Add a
+search form with a labeled input. Keep dynamic values as ordinary strings and
+never use `template.HTML` or other trusted-HTML conversions. Escape all data
+contextually through `html/template`. Use the `book_row` partial for each row
+and include an empty-results row. Return the complete contents of all three
+files and do not add JavaScript frameworks.
+
+
+TASK 2.2 — HTMX live search and librarian deletion
+
+Wire the catalog search and book-row deletion using HTMX and Go handlers in
+`internal/handler/web/`. The search input must use exactly
+`hx-get="/web/books"`,
+`hx-trigger="keyup changed delay:300ms"`, and `hx-target="#book-list"`.
+`GET /web/books?q=...` must return only escaped `book_row` HTML fragments (not
+the full page); support an empty-results fragment. The row's delete control
+must use `hx-delete="/web/books/{{.ID}}"`, `hx-target="closest tr"`,
+`hx-swap="outerHTML"`, and `hx-confirm="Delete this book?"`. Require a valid
+HttpOnly session cookie and librarian/admin role, validate same-origin for the
+cookie-authenticated mutation, and respond with an empty `200 OK` body on
+successful deletion so HTMX removes the row. Preserve JSON Bearer API routes.
+Add httptest integration coverage for the exact attributes, an
+`HX-Request: true` search returning fragments, unauthorized/reader deletion,
+and successful deletion with empty response body. Return the changed files and
+run the focused tests.
 TASK 2.3 — Loan schema and lifecycle endpoints
 
 Add a reversible migration and typed Loan model/repository/service for loan records. A loan must reference one user and one physical book copy, retain loaned/due/returned timestamps, and be created/returned transactionally with the copy status. Readers may list only their own loans. Staff may check out an available copy and return an active loan. Use parameterized GORM queries and explicit DTOs; do not add ORM AutoMigrate to application code.

@@ -1,1 +1,1 @@
-DROP TABLE IF EXISTS loans;
+../web/migrations/000006_create_loans.down.sql

@@ -58,11 +58,7 @@ func main() {
 	if databaseURL == "" {
 		log.Fatal("DATABASE_URL must be configured")
 	}
-	migrationsPath := os.Getenv("MIGRATIONS_PATH")
-	if migrationsPath == "" {
-		migrationsPath = "migrations"
-	}
-	if err := repository.ApplyMigrations(migrationsPath, databaseURL); err != nil {
+	if err := repository.ApplyEmbeddedMigrations(databaseURL); err != nil {
 		log.Fatal(err)
 	}
 	db, err := repository.OpenPostgres(databaseURL)

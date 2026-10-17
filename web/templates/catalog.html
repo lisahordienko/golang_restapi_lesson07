@@ -1,0 +1,2 @@
+{{define "catalog"}}{{template "layout" .}}{{end}}
+{{define "content"}}<tbody id="book-list">{{range .Books}}{{template "book_row" .}}{{else}}<tr><td class="empty" colspan="6">No books match this search.</td></tr>{{end}}</tbody>{{end}}
