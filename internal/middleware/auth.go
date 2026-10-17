@@ -32,3 +32,26 @@ func AuthMiddleware() gin.HandlerFunc {
 		c.Next()
 	}
 }
+
+func CookieAuthMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		cookie, err := c.Request.Cookie("libratrack_session")
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": gin.H{"code": "unauthenticated", "message": "Authentication required"}})
+			return
+		}
+		claims, err := auth.ParseToken(cookie.Value)
+		if errors.Is(err, auth.ErrJWTSecretMissing) {
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": gin.H{"code": "internal_server_error", "message": "Authentication is unavailable"}})
+			return
+		}
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": gin.H{"code": "unauthenticated", "message": "Authentication required"}})
+			return
+		}
+		c.Set("user_id", claims.UserID)
+		c.Set("role", claims.Role)
+		c.Set("auth_source", "cookie")
+		c.Next()
+	}
+}

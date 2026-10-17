@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -83,6 +84,26 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"token": token, "user": user})
+}
+
+func (h *AuthHandler) BrowserLogin(c *gin.Context) {
+	_, token, err := h.service.Login(c.Request.Context(), c.PostForm("email"), c.PostForm("password"))
+	if errors.Is(err, auth.ErrInvalidCredentials) {
+		c.String(http.StatusUnauthorized, "Invalid email or password")
+		return
+	}
+	if errors.Is(err, auth.ErrJWTSecretMissing) {
+		c.String(http.StatusInternalServerError, "Authentication is unavailable")
+		return
+	}
+	if err != nil {
+		c.String(http.StatusInternalServerError, "Unable to sign in")
+		return
+	}
+	maxAge := int((24 * time.Hour).Seconds())
+	c.SetSameSite(http.SameSiteLaxMode)
+	c.SetCookie("libratrack_session", token, maxAge, "/", "", c.Request.TLS != nil || c.GetHeader("X-Forwarded-Proto") == "https", true)
+	c.Redirect(http.StatusSeeOther, "/catalog")
 }
 
 func (h *AuthHandler) Me(c *gin.Context) {

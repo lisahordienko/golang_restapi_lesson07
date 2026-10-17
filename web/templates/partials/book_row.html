@@ -1,0 +1,10 @@
+{{define "book_row"}}
+<tr>
+  <td class="title-cell">{{.Title}}</td>
+  <td>{{range $index, $author := .Authors}}{{if $index}}, {{end}}{{$author.FullName}}{{else}}<span class="muted">Unlisted</span>{{end}}</td>
+  <td>{{.Category.Name}}</td>
+  <td><span class="availability {{if gt .Available 0}}available{{else}}unavailable{{end}}"><i></i>{{.Available}} / {{.Total}} available</span></td>
+  <td class="isbn">{{.ISBN}}</td>
+  <td class="actions">{{if $.CanDelete}}<button class="delete" type="button" title="Delete book" aria-label="Delete {{.Title}}" hx-delete="/web/books/{{.ID}}" hx-target="closest tr" hx-swap="outerHTML" hx-confirm="Delete this book?">Remove</button>{{end}}</td>
+</tr>
+{{end}}

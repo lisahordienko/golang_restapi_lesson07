@@ -190,6 +190,17 @@ PORT=8081 go run ./cmd/api
 
 Варіант читається з `VARIANT`; у цьому репозиторії встановлено `books`. HTTPS використовується лише за потреби і потребує вказати `TLS_CERT_FILE` та `TLS_KEY_FILE`.
 
+Каталог LibraTrack
+------------------
+
+Production-сервер також надає `/catalog` із live-пошуком через HTMX
+(`/web/books?q=...`) та локально вбудованими CSS/HTMX-ресурсами. Шаблони
+використовують `html/template`; SQL-міграції, `VARIANT` і web-ресурси включені
+в бінарник через `go:embed`, тому поруч не потрібні папки `migrations`, `web`
+або `templates`. PostgreSQL залишається необхідною залежністю; налаштуйте
+`DATABASE_URL` і `JWT_SECRET`. Вхід через форму браузера `/web/login` встановлює
+HttpOnly cookie; REST endpoint входу зберігає Bearer-token контракт для API.
+
 Реалізовано:
 
 - повністю, ізоловане сховище для кожного `NewRouter()`;

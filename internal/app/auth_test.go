@@ -56,7 +56,7 @@ func TestAuthIntegration(t *testing.T) {
 		}
 	})
 
-	t.Run("valid login returns signed jwt", func(t *testing.T) {
+	t.Run("valid API login returns signed bearer token", func(t *testing.T) {
 		response := requestJSON(t, http.MethodPost, server.URL+"/api/v1/auth/login", `{"email":"reader@example.test","password":"strong-password"}`, "")
 		if response.StatusCode != http.StatusOK {
 			t.Fatalf("status = %d, want 200", response.StatusCode)
