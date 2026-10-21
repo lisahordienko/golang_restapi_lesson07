@@ -1,0 +1,27 @@
+base: template:ubuntu-lts
+cpus: 4
+memory: 6GiB
+disk: 30GiB
+
+mounts:
+  - location: "~/golang_restapi_lesson07"
+    mountPoint: /app
+    writable: false
+
+portForwards:
+  - guestPort: 4566
+    hostPort: 4566
+  - guestPort: 30080
+    hostPort: 30080
+  - guestPort: 6443
+    ignore: true
+
+provision:
+  - mode: system
+    script: |
+      #!/bin/bash
+      set -eux
+      command -v docker >/dev/null || curl -fsSL https://get.docker.com | sh
+      usermod -aG docker "{{.User}}"
+      apt-get install -y zip unzip golang-go
+      command -v k3s >/dev/null || curl -sfL https://get.k3s.io | sh -s - --write-kubeconfig-mode 644

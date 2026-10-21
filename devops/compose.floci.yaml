@@ -1,0 +1,11 @@
+services:
+  aws-emulator:
+    image: hectorvent/floci:latest
+    container_name: floci_aws
+    user: root
+    environment:
+      FLOCI_SERVICES_LAMBDA_DOCKER_NETWORK: devops_default
+    ports:
+      - "4566:4566"
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock"

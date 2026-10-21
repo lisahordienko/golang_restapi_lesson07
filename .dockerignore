@@ -1,0 +1,5 @@
+.git
+certs
+*.md
+*.docx
+.env

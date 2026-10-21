@@ -1,0 +1,136 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: libratrack
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: libratrack-secret
+  namespace: libratrack
+type: Opaque
+stringData:
+  POSTGRES_DB: libratrack
+  POSTGRES_USER: libratrack
+  POSTGRES_PASSWORD: libratrack
+  JWT_SECRET: change-me-in-cluster
+  DATABASE_URL: postgres://libratrack:libratrack@postgres:5432/libratrack?sslmode=disable
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-data
+  namespace: libratrack
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: libratrack
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          ports:
+            - containerPort: 5432
+          envFrom:
+            - secretRef:
+                name: libratrack-secret
+          env:
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "libratrack", "-d", "libratrack"]
+            periodSeconds: 5
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: postgres-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: libratrack
+spec:
+  selector:
+    app: postgres
+  ports:
+    - port: 5432
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: libratrack
+  namespace: libratrack
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: libratrack
+  template:
+    metadata:
+      labels:
+        app: libratrack
+    spec:
+      initContainers:
+        - name: wait-for-db
+          image: postgres:16-alpine
+          command: ["sh", "-c", "until pg_isready -h postgres -U libratrack; do sleep 2; done"]
+      containers:
+        - name: api
+          image: libratrack:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+          env:
+            - name: PORT
+              value: "8080"
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: libratrack-secret
+                  key: JWT_SECRET
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: libratrack-secret
+                  key: DATABASE_URL
+          readinessProbe:
+            tcpSocket:
+              port: 8080
+            periodSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: libratrack
+  namespace: libratrack
+spec:
+  type: NodePort
+  selector:
+    app: libratrack
+  ports:
+    - port: 8080
+      targetPort: 8080
+      nodePort: 30080
